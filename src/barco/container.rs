@@ -1,4 +1,5 @@
 use std::ffi::CString;
+use std::sync::Arc;
 
 use anyhow::Result;
 use log::{debug, error, info};
@@ -12,49 +13,18 @@ use nix::unistd::Pid;
 pub struct Container {
     stack: Vec<u8>,
     pid: Option<Pid>,
+
+    mnt: String
 }
 
 impl Container {
-    pub fn new(stack_size: u64) -> Self {
+    pub fn new(stack_size: u64, mnt: String) -> Self {
         info!("Creating Container with options:");
         info!("\tstack_size: {} byte", stack_size);
         Self {
             stack: vec![0; stack_size as usize],
             pid: None,
-        }
-    }
-
-    fn container_start(&mut self) -> impl FnMut() -> isize {
-        || -> isize {
-            info!("Container initalizing...");
-            let hostname = "container";
-            debug!("Invoking syscall: sethostname");
-            let err = unsafe { sethostname(hostname.as_ptr() as *const i8, hostname.len()) };
-            if err != 0 {
-                return errno() as isize;
-            }
-            debug!("Invoking syscall: mount");
-            // let err = unsafe {
-            //     mount(
-            //         std::ptr::null(),
-            //         "/\0".as_ptr() as *const i8,
-            //         std::ptr::null(),
-            //         MS_REC | MS_PRIVATE,
-            //         std::ptr::null(),
-            //     )
-            // };
-            // if err != 0 {
-            //     return errno() as isize;
-            // }
-            info!("Start executing container");
-            debug!("Invoking syscall: execvp");
-            unsafe {
-                execvp(
-                    CString::new("/bin/bash").unwrap().into_raw(),
-                    std::ptr::null(),
-                )
-            };
-            errno() as isize
+            mnt: mnt
         }
     }
 
@@ -67,9 +37,38 @@ impl Container {
             | CloneFlags::CLONE_NEWIPC
             | CloneFlags::CLONE_NEWNET
             | CloneFlags::CLONE_NEWUTS;
+        
+        let mnt = Arc::new(self.mnt.clone());
+        let mnt_clone = mnt.clone();
+
+        let container_start = || -> isize {
+            info!("Container initalizing...");
+            let hostname = "container";
+            debug!("Invoking syscall: sethostname");
+            let err = unsafe { sethostname(hostname.as_ptr() as *const i8, hostname.len()) };
+            if err != 0 {
+                return errno() as isize;
+            }
+            let mnt_point = mnt_clone.as_ref();
+            if let Ok(()) = mount_set(mnt_point.clone()) {
+                info!("mount for {} successful!", mnt_point)
+            } else {
+                panic!("mount failed for {}", mnt_point)
+            }
+            info!("Start executing container");
+            debug!("Invoking syscall: execvp");
+            unsafe {
+                execvp(
+                    CString::new("/bin/bash").unwrap().into_raw(),
+                    std::ptr::null(),
+                )
+            };
+            errno() as isize
+        };
+        
         let pid = unsafe {
             clone(
-                Box::new(self.container_start()),
+                Box::new(container_start),
                 self.stack.as_mut_slice(),
                 flags,
                 Some(SIGCHLD as i32),
@@ -101,4 +100,21 @@ impl Container {
             }
         }
     }
+}
+
+fn mount_set(mnt: String) -> Result<()> {
+    debug!("Invoking syscall: mount");
+    // let err = unsafe {
+    //     mount(
+    //         std::ptr::null(),
+    //         "/\0".as_ptr() as *const i8,
+    //         std::ptr::null(),
+    //         MS_REC | MS_PRIVATE,
+    //         std::ptr::null(),
+    //     )
+    // };
+    // if err != 0 {
+    //     return errno() as isize;
+    // }
+    Ok(())
 }

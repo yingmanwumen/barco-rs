@@ -11,7 +11,7 @@ pub struct Cli {
     #[clap(short, long, default_value = "1")]
     pub uid: u64,
 
-    #[clap(short, long, default_value = "/")]
+    #[clap(short, long, default_value = "/tmp/sjq")]
     pub mnt: String,
 
     #[clap(short, long)]

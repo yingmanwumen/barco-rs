@@ -20,7 +20,7 @@ fn main() -> Result<()> {
         Some(s) => s,
         None => get_stack_rlimit()?,
     };
-    let mut container = Container::new(stack_size);
+    let mut container = Container::new(stack_size, cli.mnt);
     container.start()?;
     match container.wait()? {
         0 => Ok(()),
